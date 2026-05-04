@@ -1,115 +1,64 @@
+import os
 import logging
 import requests
-import os
-import time
 from dotenv import load_dotenv
-# from src.logger import log_info, log_error
-import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+# Assuming you import your configured logger
+# from src.utils.logger import _logger 
+logger = logging.getLogger("nimbus_logger")
 
 load_dotenv()
 
 class AemetClient:
-
-    def __init__(self):
-        self.api_key = os.getenv("AEMET_API_KEY")
-        self.base_url = "https://opendata.aemet.es/opendata/api"
+    def __init__(self, base_url: str = "https://opendata.aemet.es/opendata/api"):
+        """Inicializa el cliente de la API con una sesión persistente."""
+        self.base_url = base_url
+        self.api_key = os.getenv("WEATHER_API_KEY")
         self.session = requests.Session()
-
-        # Headers obligatorios
+        
+        # Cabecera requerida por el checklist: Respeto al Servidor
         self.session.headers.update({
-            "User-Agent": "NimbusData/1.0",
-            "api_key": self.api_key
+            "User-Agent": "NimbusClimateApp/1.0",
+            "Content-Type": "application/json"
         })
         
-        # Configurar reintentos
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=2,
-            status_forcelist=[429, 500, 502, 503]
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.session.mount("https://", adapter)
+        # Opcional pero recomendado: Lógica de reintentos (Retries)
+        retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+        self.session.mount('https://', HTTPAdapter(max_retries=retries))
 
-    def get_weather(self, station_id, start_date, end_date):
-
-        endpoint = f"/valores/climatologicos/diarios/datos/fechaini/{start_date}/fechafin/{end_date}/estacion/{station_id}"
-        url = f"{self.base_url}/{endpoint}"
+    def fetch_data(self, endpoint: str, params: dict = None) -> list | dict | None:
+        """
+        Realiza la petición GET. Falla con gracia si hay errores HTTP sin detener el programa.
+        """
+        url = f"{self.base_url}{endpoint}"
+        
+        if params is None:
+            params = {}
+            
+        # AEMET suele requerir la API key en los parámetros
+        if self.api_key:
+            params['api_key'] = self.api_key
 
         try:
-                # 🔹 PRIMER REQUEST
-                start = time.time()
-                response = self.session.get(url, timeout=5)
-                latency = time.time() - start
-
-                logging.info(f"STEP1 {url} - {response.status_code} - {latency:.2f}s")
-
-                if response.status_code != 200:
-                    logging.error(f"Error inicial: {response.status_code}")
-                    return None
-
-                data_url = response.json().get("datos")
-
-                if not data_url:
-                    logging.error("No se encontró URL de datos")
-                    return None
-
-                # 🔹 SEGUNDO REQUEST
-                response_data = self.session.get(data_url, timeout=5)
-
-                logging.info(f"STEP2 {data_url} - {response_data.status_code}")
-
-                if response_data.status_code == 200:
-                    return response_data.json()
-
-                elif response_data.status_code == 404:
-                    logging.error("404 en datos")
-
-                elif response_data.status_code == 429:
-                    logging.error("429 rate limit")
-
-                return None
-
-        except Exception as e:
-            logging.error(f"Error general: {e}")
+            logger.info(f"Solicitando datos a: {url}")
+            response = self.session.get(url, params=params, timeout=10)
+            
+            # Verifica los códigos de estado (200, 401, 403, 404, 429)
+            response.raise_for_status() 
+            
+            return response.json()
+            
+        except requests.exceptions.HTTPError as http_err:
+            logger.error(f"Error HTTP {response.status_code}: {http_err}")
             return None
-        
-    def get_stations(self): 
-
-        endpoint = "/valores/climatologicos/inventarioestaciones/todasestaciones"
-        url = f"{self.base_url}/{endpoint}"
-        
-        try:
-            response = self.session.get(url, timeout=5)
-
-            logging.info(f"GET {url} - {response.status_code}")
-
-            if response.status_code != 200:
-                logging.error(f"Error al obtener estaciones: {response.status_code}")
-                return None
-
-            data_url = response.json().get("datos")
-
-            if not data_url:
-                logging.error("No se encontró URL de datos de estaciones")
-                return None
-
-            response_data = self.session.get(data_url, timeout=5)
-
-            logging.info(f"GET {data_url} - {response_data.status_code}")
-
-            if response_data.status_code == 200:
-                return response_data.json()
-
-            elif response_data.status_code == 404:
-                logging.error("404 en datos de estaciones")
-
-            elif response_data.status_code == 429:
-                logging.error("429 rate limit en datos de estaciones")
-
+        except requests.exceptions.ConnectionError:
+            logger.error("Error de conexión. Verifica la conectividad de red.")
             return None
-
+        except requests.exceptions.Timeout:
+            logger.error("Timeout: El servidor de la API tardó demasiado en responder.")
+            return None
         except Exception as e:
-            logging.error(f"Error general al obtener estaciones: {e}")
+            logger.error(f"Error inesperado durante la petición a la API: {e}")
             return None

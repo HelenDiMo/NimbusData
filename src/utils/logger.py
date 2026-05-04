@@ -7,6 +7,13 @@ def config_logger(name="nimbus_logger", log_file="logs/app.log", level=logging.I
     """
 
     # Evitar duplicar logs
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
+    # 2. Instantiate the logger FIRST
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+
+    # 3. NOW check if handlers exist to avoid duplicate logs
     if logger.handlers:
         return logger
 
