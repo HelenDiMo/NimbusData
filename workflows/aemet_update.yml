@@ -2,7 +2,7 @@ name: Actualizar datos AEMET
 
 on:
   schedule:
-    - cron: "0 * * * *"  # cada hora
+    - cron: "13 * * *"  # cada hora
   workflow_dispatch:      # permite ejecutarlo manualmente
 
 jobs:
