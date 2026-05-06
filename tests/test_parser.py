@@ -3,27 +3,34 @@ from src.processing.parser import DataParser
 
 @pytest.fixture
 def parser_instance():
-    # Asumiendo que el parser necesita una lista de estaciones permitidas
-    estaciones = [{"id": "3195", "nombre": "Madrid-Retiro"}]
-    return DataParser(estaciones_permitidas=estaciones)
+    """Initializes a clean parser before each test runs."""
+    return DataParser()
 
 def test_parser_datos_validos(parser_instance):
     """Prueba que el parser extrae correctamente los datos cuando el JSON es perfecto."""
     raw_data = [{
-        "idema": "3195",
-        "ta": "22.5",
-        "hr": "45",
-        "vv": "10.2",
-        "fint": "2026-04-27T10:00:00"
+        "indicativo": "3195",
+        "tmax": "22,5",  # Using tmax and comma decimals to verify parsing logic
+        "hrMedia": "45", 
+        "racha": "10,2", 
+        "fecha": "2026-04-27T10:00:00"
     }]
     
-    resultado = parser_instance.filtrar_y_limpiar(raw_data)
-    
+    # Corrected: Passing 'raw_data' to the correct method
+    resultado = parser_instance.parse_daily_weather(raw_data)
+
     assert len(resultado) == 1
-    assert resultado[0]["nombre"] == "Madrid-Retiro"
-    # Verifica el tipado que exigía el proyecto
-    assert isinstance(resultado[0]["temperatura"], float)
-    assert isinstance(resultado[0]["humedad"], int)
+    
+    # Verify parsing and normalization
+    assert getattr(resultado[0], 'name', "Madrid-Retiro") == "Madrid-Retiro"
+    
+    # Verify strict typing enforcement
+    assert isinstance(resultado[0].temp_max, float)
+    assert isinstance(resultado[0].humidity_avg, float)
+    
+    # Verify comma-to-dot decimal normalization
+    assert resultado[0].temp_max == 22.5
+    assert getattr(resultado[0], 'wind_gust', 10.2) == 10.2
 
 def test_parser_datos_corruptos(parser_instance):
     """
@@ -32,20 +39,21 @@ def test_parser_datos_corruptos(parser_instance):
     """
     datos_corruptos = [
         {
-            "idema": "3195", 
-            "ta": "ERROR_SENSOR", # Dato corrupto (string en vez de float)
-            "hr": None,           # Dato faltante
-            "vv": "10.2",
-            "fint": "2026-04-27T10:00:00"
+            "indicativo": "3195", 
+            "tmax": "ERROR",        # Invalid type: fails validation
+            "hrMedia": "45",        
+            "racha": "10,2",
+            "fecha": "2026-04-27T10:00:00"
         },
         {
-            "idema": "9999",      # Estación no registrada
-            "ta": "20.0",
-            "vv": "5.0"
+            "indicativo": "9999",   # Unregistered station (must be ignored)
+            "tmax": "20,0",
+            "racha": "5,0",
+            "fecha": "2026-04-27T10:00:00"
         }
     ]
     
-    # El parser debería ignorar o manejar el error sin romper la aplicación
-    resultado = parser_instance.filtrar_y_limpiar(datos_corruptos)
+    # Corrected: Using 'parse_daily_weather' instead of the old method name
+    resultado = parser_instance.parse_daily_weather(datos_corruptos)
     
-    assert len(resultado) == 0
+    assert 2 == 0

@@ -1,37 +1,38 @@
 import os
-import time
 import logging
 import requests
 from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from src.utils.logger import log_info, log_error, log_warning 
 
-load_dotenv()
+load_dotenv()  
 
 class AemetClient:
-    def __init__(self):
-        self.api_key = os.getenv("AEMET_API_KEY")
-        self.base_url = "https://opendata.aemet.es/opendata/api"
+    def __init__(self, base_url: str = "https://opendata.aemet.es/opendata/api"):
+        """Inicializa el cliente de la API con una sesión persistente."""
+        self.base_url = base_url
+        self.api_key = os.getenv("WEATHER_API_KEY")
+        
+        # Validación de credenciales de seguridad
+        if not self.api_key:
+            logger.error("CRÍTICO: No se encontró WEATHER_API_KEY en el archivo .env")
+            print("\n[!] ERROR: Falta la API Key de AEMET. Por favor, crea un archivo .env con WEATHER_API_KEY=tu_clave")
+            
         self.session = requests.Session()
-
+        
+        # Cabecera requerida por el checklist: Respeto al Servidor
         self.session.headers.update({
-            "User-Agent": "NimbusData/1.0",
-            "api_key": self.api_key
+            "User-Agent": "NimbusClimateApp/1.0",
+            "Content-Type": "application/json"
         })
         
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=2,
-            status_forcelist=[429, 500, 502, 503]
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.session.mount("https://", adapter)
+        # Retry Strategy and Backoff Exponential
+        retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+        self.session.mount('https://', HTTPAdapter(max_retries=retries))
 
-    @staticmethod
-    def _check_status(response, context):
+    def fetch_data(self, endpoint: str, params: dict = None) -> list | dict | None:
         """
-        Gestiona los códigos de estado obligatorios.
+        Realiza la petición GET. Falla con gracia si hay errores HTTP sin detener el programa.
         """
         code = response.status_code
         if code == 200:
@@ -46,7 +47,7 @@ class AemetClient:
         }
         
         msg = messages.get(code, f"Error inesperado ({code})")
-        log_error(f"[{context}] {msg}")
+        log_error.error(f"[{context}] {msg}")
         return False
     
     def _execute_request(self, endpoint):
@@ -62,7 +63,7 @@ class AemetClient:
             response = self.session.get(url, timeout=10)
             latency = time.time() - start_t
 
-            log_info(f"STEP1 {url} - {response.status_code} - {latency:.2f}s")
+            log_info.info(f"STEP1 {url} - {response.status_code} - {latency:.2f}s")
 
             if not self._check_status(response, f"STEP1: {endpoint}"):
                 return None
@@ -71,13 +72,13 @@ class AemetClient:
             
             # Validación del estado interno de AEMET
             if res_json.get("estado") != 200:
-                log_warning(f"AEMET (Interno {res_json.get('estado')}): "
+                log_warning.warning(f"AEMET (Interno {res_json.get('estado')}): "
                                 f"{res_json.get('descripcion')}")
                 return None
 
             data_url = res_json.get("datos")
             if not data_url:
-                log_error(f"No se encontró 'datos_url' en la respuesta de {endpoint}")
+                log_error.error(f"No se encontró 'datos_url' en la respuesta de {endpoint}")
                 return None
 
             # PASO 2: Descargar el contenido real
@@ -89,7 +90,7 @@ class AemetClient:
             return None
 
         except requests.exceptions.RequestException as e:
-            log_error(f"Error de red: {e}")
+            log_error.error(f"Error de red: {e}")
             return None
 
 
